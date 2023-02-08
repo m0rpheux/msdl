@@ -1,0 +1,252 @@
+const langsUrl = "https://www.microsoft.com/en-us/api/controls/contentinclude/html?pageId=cd06bda8-ff9c-4a6e-912a-b92a21f42526&host=www.microsoft.com&segments=software-download%2cwindows11&query=&action=getskuinformationbyproductedition&sdVersion=2";
+const downUrl = "https://www.microsoft.com/en-us/api/controls/contentinclude/html?pageId=cfa9e580-a81e-4a4b-a846-7b21bf4e2e5b&host=www.microsoft.com&segments=software-download%2Cwindows11&query=&action=GetProductDownloadLinksBySku&sdVersion=2";
+const sessionUrl = "https://vlscppe.microsoft.com/fp/tags?org_id=y6jn8c31&session_id="
+
+const sessionId = document.getElementById('msdl-session-id');
+const msContent = document.getElementById('msdl-ms-content');
+const pleaseWait = document.getElementById('msdl-please-wait');
+const processingError = document.getElementById('msdl-processing-error');
+
+const productsList = document.getElementById('products-list');
+const backToProductsDiv = document.getElementById('back-to-products');
+const useSharedSessionDiv = document.getElementById('use-shared-session');
+
+const sharedSessionGUID = "47cbc254-4a79-4be6-9866-9c625eb20911";
+
+var msdlXhr = new XMLHttpRequest();
+
+var availableProducts = {};
+
+var sharedSession = false;
+
+function uuidv4() {
+    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+    );
+}
+
+function updateVars() {
+    var id = document.getElementById('product-languages').value;
+    if (id == "") {
+        document.getElementById('submit-sku').disabled = 1;
+        return;
+    }
+
+    id = JSON.parse(id);
+    document.getElementById('submit-sku').disabled = 0;
+
+    return id;
+}
+
+function checkForError(content) {
+    var errorMessage = document.getElementById('errorModalMessage');
+
+    if (errorMessage) {
+        processingError.style.display = "block";
+        useSharedSessionDiv.style.display = "block";
+        return true;
+    }
+
+    return false;
+}
+
+function updateContent(content, response) {
+    content.innerHTML = response;
+    return !checkForError(content);
+}
+
+function abortAndHide() {
+    backToProductsDiv.style.display = 'none';
+    useSharedSessionDiv.style.display = 'none';
+    productsList.style.display = 'block';
+
+    msdlXhr.abort();
+
+    msContent.style.display = 'none';
+    pleaseWait.style.display = 'none';
+    processingError.style.display = 'none';
+}
+
+function fixSubmitSku() {
+    var submitSku = document.getElementById('submit-sku');
+    submitSku.setAttribute("onClick", "getDownload();");
+}
+
+function fixProdLang() {
+    var prodLang = document.getElementById('product-languages');
+    prodLang.setAttribute("onChange", "updateVars();");
+}
+
+function fixLanguageList() {
+    fixSubmitSku();
+    fixProdLang();
+}
+
+function onLanguageXhrChange() {
+    if (!(this.readyState == 4 && this.status == 200))
+        return;
+
+    if (pleaseWait.style.display != "block")
+        return;
+
+    pleaseWait.style.display = "none";
+    msContent.style.display = "block";
+
+    if (!updateContent(msContent, this.responseText))
+        return;
+
+    fixLanguageList();
+    updateVars();
+}
+
+function onDownloadsXhrChange() {
+    if (!(this.readyState == 4 && this.status == 200))
+        return;
+
+    if (pleaseWait.style.display != "block")
+        return;
+
+    pleaseWait.style.display = "none";
+    msContent.style.display = "block";
+
+    if (updateContent(msContent, this.responseText) && !sharedSession) {
+        fetch(sessionUrl + sharedSessionGUID);
+    }
+}
+
+function getLanguages(productId) {
+    msContent.style.display = "none";
+    pleaseWait.style.display = "block";
+
+    var url = langsUrl + "&productEditionId=" + encodeURIComponent(productId) +
+        "&sessionId=" + (sharedSession ? sharedSessionGUID : sessionId.value);
+
+    msdlXhr.abort();
+    msdlXhr.onreadystatechange = onLanguageXhrChange;
+    msdlXhr.open("GET", url, true);
+    msdlXhr.send();
+}
+
+function getDownload() {
+    msContent.style.display = "none";
+    pleaseWait.style.display = "block";
+
+    var id = updateVars();
+
+    var url = downUrl + "&skuId=" + encodeURIComponent(id['id']) +
+        "&language=" + encodeURIComponent(id['language']) +
+        "&sessionId=" + (sharedSession ? sharedSessionGUID : sessionId.value);
+
+    msdlXhr.abort();
+    msdlXhr.onreadystatechange = onDownloadsXhrChange;
+    msdlXhr.open("GET", url, true);
+    msdlXhr.send();
+}
+
+function backToProducts() {
+    abortAndHide();
+    window.location.hash = "";
+}
+
+function useSharedSession() {
+    sharedSession = true;
+    abortAndHide();
+    prepareDownload(window.location.hash.substring(1))
+}
+
+function prepareDownload(id) {
+    productsList.style.display = 'none';
+    backToProductsDiv.style.display = 'block';
+
+    const xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = () => { getLanguages(id) };
+    xhr.open("GET", sessionUrl + sessionId.value, true);
+    xhr.send();
+}
+
+function addTableElement(table, value, data) {
+    var a = document.createElement('a')
+    a.href = "#" + value;
+    a.setAttribute("onClick", "prepareDownload(" + value + ");");
+    a.appendChild(document.createTextNode(data[value]))
+
+    var tr = table.insertRow();
+
+    var td = tr.insertCell();
+    td.appendChild(a);
+
+    var td2 = tr.insertCell();
+    td2.appendChild(document.createTextNode(value))
+}
+
+function createTable(data, search) {
+    var table = document.getElementById('products-table-body');
+    var regex = new RegExp('' + search + '', 'ig');
+
+    table.innerHTML = "";
+
+    for (value in data) {
+        if (data[value].match(regex) == null)
+            continue;
+
+        addTableElement(table, value, data);
+    }
+}
+
+function updateResults() {
+    var search = document.getElementById('search-products');
+    createTable(availableProducts, search.value);
+}
+
+function setSearch(query) {
+    var search = document.getElementById('search-products');
+    search.value = query;
+    updateResults();
+}
+
+function checkHash() {
+    var hash = window.location.hash;
+    if (hash.length == 0)
+        return
+
+    prepareDownload(hash.substring(1))
+}
+
+function preparePage(resp) {
+    var products = JSON.parse(resp);
+    if (!products['products']) {
+        pleaseWait.style.display = 'none';
+        processingError.style.display = 'block';
+        return;
+    }
+
+    availableProducts = products['products'];
+
+    pleaseWait.style.display = 'none';
+    productsList.style.display = 'block';
+
+    updateResults();
+    checkHash();
+}
+
+var xhr = new XMLHttpRequest();
+
+xhr.onreadystatechange = function () {
+    if (this.readyState != 4)
+        return;
+
+    if (this.status != 200) {
+        pleaseWait.style.display = 'none';
+        processingError.style.display = 'block';
+        return;
+    }
+
+    preparePage(this.responseText);
+};
+
+sessionId.value = uuidv4();
+
+xhr.open("GET", 'data/products.json', true);
+xhr.send();
+
+pleaseWait.style.display = 'block';
